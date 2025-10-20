@@ -1,319 +1,356 @@
 <?php
-// index.php (Shopping Page - Modern Minimalist Design with Animation)
-
-session_start(); 
-
-// --- Logout Handling (NEW) ---
-if (isset($_GET['logout'])) {
-    session_destroy();
-    header('Location: login.php');
-    exit;
-}
-// -----------------------------
+session_start();
 
 // --- CATEGORY HIERARCHY DEFINITION ---
-// Keys are Parent categories. Values are the Sub-categories.
+// This map defines the sub-categories visually in the Admin Add Product form.
 $parent_categories = [
     'Clothing' => ['Clothing Boy', 'Clothing Girl'],
     'Shoes' => ['Shoes Boy', 'Shoes Girl'],
 ];
 
-// --- DATABASE INCLUSION & MOCK SETUP ---
-// NOTE: This mock logic ensures the page works even if '../includes/db.php' is missing.
-if (!file_exists('../includes/db.php')) {
-    // ----------------------------------------------------------------------------------
-    // MOCK DATABASE SETUP (Updated with separate IDs for sub-categories)
-    // ----------------------------------------------------------------------------------
-    $categories_mock_array = [
-        1 => 'Clothing', 
-        2 => 'Accessories', 
-        3 => 'Shoes', 
-        4 => 'Skin Care',
-        5 => 'Clothing Boy',    // New Mock ID
-        6 => 'Clothing Girl',   // New Mock ID
-        7 => 'Shoes Boy',       // New Mock ID
-        8 => 'Shoes Girl',      // New Mock ID
-    ];
-    
-    // MOCK PRODUCTS (Updated category_id)
-    $products_mock = [ // Changed variable name to avoid conflict
-        // Linked to Parent: Clothing (ID 1)
-        ['id' => 1, 'name' => 'Linen Blazer', 'price' => 149.99, 'image_path' => 'product_images/blazer.jpg', 'video_path' => null, 'category_id' => 1, 'details' => "A beautifully tailored linen blazer, perfect for spring and summer evenings. Breathable fabric and a modern fit.", 'stock_qty' => 10],
-        ['id' => 2, 'name' => 'Flowy Dress (Girl)', 'price' => 89.99, 'image_path' => 'product_images/dress.jpg', 'video_path' => null, 'category_id' => 6, 'details' => "An elegant, ankle-length dress with a comfortable, flowy design. Ideal for casual outings or a beach vacation.\n\nMaterial: 100% Rayon\nCare: Machine Wash Cold", 'stock_qty' => 5], 
-        ['id' => 3, 'name' => 'Leather Loafers (Boy)', 'price' => 110.00, 'image_path' => 'product_images/loafers.jpg', 'video_path' => null, 'category_id' => 7, 'details' => "Classic Italian leather loafers. Hand-stitched sole for superior comfort and durability. Available in black and brown.", 'stock_qty' => 12],
-        
-        // Linked to Parent: Shoes (ID 3)
-        ['id' => 4, 'name' => 'Running Sneakers (Girl)', 'price' => 75.00, 'image_path' => 'product_images/earrings.jpg', 'video_path' => null, 'category_id' => 8, 'details' => "Lightweight and durable running shoes with memory foam insoles.", 'stock_qty' => 20],
-        
-        // Linked to Accessories/Skin Care
-        ['id' => 5, 'name' => 'Gold Hoop Earrings', 'price' => 29.99, 'image_path' => 'product_images/earrings.jpg', 'video_path' => null, 'category_id' => 2, 'details' => "Hypoallergenic 18k gold-plated hoop earrings. Subtle yet stylish, perfect for daily wear.", 'stock_qty' => 50],
-        ['id' => 6, 'name' => 'Hydrating Serum', 'price' => 45.00, 'image_path' => 'product_images/serum.jpg', 'video_path' => null, 'category_id' => 4, 'details' => "A powerful hydrating serum infused with Hyaluronic Acid and Vitamin C. Reduces fine lines and brightens skin tone. Use morning and night.", 'stock_qty' => 8],
-    ];
-    
-    // Simple query simulation for mock data
-    $conn = new class {
-        public $categories_map = ['Clothing' => 1, 'Accessories' => 2, 'Shoes' => 3, 'Skin Care' => 4, 'Clothing Boy' => 5, 'Clothing Girl' => 6, 'Shoes Boy' => 7, 'Shoes Girl' => 8]; // Updated Mock map
-        public $products_mock = []; // Store a copy of mock products here
-        
-        public function __construct() {
-            $this->products_mock = $GLOBALS['products_mock'];
-        }
-        
-        // Mock query function
-        public function query($sql) {
-            
-            // --- MOCK CATEGORY LIST QUERY ---
-            if (strpos($sql, 'SELECT id, name FROM categories') !== false) {
-                 $mock_cats = array_map(function($id, $name) { return ['id' => $id, 'name' => $name]; }, array_keys($GLOBALS['categories_mock_array']), array_values($GLOBALS['categories_mock_array']));
-                return (object)['num_rows' => count($mock_cats), 'fetch_assoc' => function() use (&$mock_cats) {
-                    return array_shift($mock_cats);
-                }];
-            }
-            
-            // --- MOCK AUTH CHECK (Used by auth_check.php or fallback if mock is enabled) ---
-            // Assumes user exists and is verified in mock environment
-            if (strpos($sql, 'SELECT id FROM users WHERE id =') !== false) {
-                 return (object)['num_rows' => 1, 'fetch_assoc' => function() { return ['id' => $_SESSION['user_id']]; }, 'close' => function() {}];
-            }
-            
-            // --- MOCK PRODUCT LIST QUERY (Filtering) ---
-            $current_selection_name = $_GET['cat'] ?? 'All';
-            $base_category_to_filter = $current_selection_name;
+// --- DATABASE CONFIGURATION ---
+$DB_HOST = "localhost";
+$DB_USER = "root";
+$DB_PASS = ""; 
+$DB_NAME = "shop_db";
 
-            $categories_map = $this->categories_map;
-            $parent_categories = $GLOBALS['parent_categories'];
-            $is_parent_category = array_key_exists($base_category_to_filter, $parent_categories);
-
-            $filtered_products = $this->products_mock;
-            if ($base_category_to_filter !== 'All') {
-                $target_id = $categories_map[$base_category_to_filter] ?? null;
-
-                $filtered_products = array_filter($this->products_mock, function($p) use ($target_id, $is_parent_category, $categories_map, $parent_categories) {
-                    if ($is_parent_category) {
-                        // Logic for parent category filter
-                        $sub_category_ids = array_filter(array_map(function($sub_name) use ($categories_map) {
-                            return $categories_map[$sub_name] ?? null;
-                        }, $parent_categories[$_GET['cat']]));
-                        
-                        return in_array($p['category_id'], array_merge([$target_id], $sub_category_ids));
-                    }
-                    // Filter by specific category ID (Sub-category or standalone)
-                    return $p['category_id'] === $target_id;
-                });
-            }
-            // --- MOCK PRODUCT LIST QUERY (Specific IDs for Cart Fetch) ---
-            if (preg_match('/WHERE id IN \((.*?)\)/', $sql, $matches)) {
-                $ids = array_map('intval', explode(',', $matches[1]));
-                // FIX: Replaced PHP 7.4 arrow function (fn) with compatible anonymous function
-                $filtered_products = array_filter($this->products_mock, function($p) use ($ids) {
-                    return in_array($p['id'], $ids);
-                });
-            }
-            
-            $filtered_products = array_values($filtered_products);
-            
-            return (object)['num_rows' => count($filtered_products), 'fetch_assoc' => function() use (&$filtered_products) {
-                return array_shift($filtered_products);
-            }, 'close' => function() {}];
-        }
-        public function close() {}
-        public function real_escape_string($str) { return $str; }
-    };
-    $products_list = $GLOBALS['products_mock']; // Ensure products list is available for cart fetch
-} else {
-    // REAL DATABASE CONNECTION
-    include('../includes/db.php'); 
-    $products_list = []; // Products fetched later
+// Enable MySQLi to throw exceptions for better error handling
+if (class_exists('mysqli') && defined('MYSQLI_REPORT_ERROR')) {
+    mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 }
 
-// ------------------------------------------------------------------
-// --- FIX: ROBUST ACCESS CONTROL (AFTER $conn IS DEFINED) ---
-// ------------------------------------------------------------------
-
-// 1. If auth_check.php exists (it should), use it to verify the session against the DB
-if (file_exists('auth_check.php')) {
-    // THIS LINE WILL RUN THE CODE IN auth_check.php
-    // If the user is deleted or unverified, auth_check.php will run header('Location: login.php') and exit.
-    include('auth_check.php'); 
-} else {
-    // 2. Fallback: Simple Session Check if auth_check.php is missing (less secure)
-    if (!isset($_SESSION['user_id'])) {
-        header('Location: login.php');
-        exit;
+$conn = false;
+try {
+    $conn = new mysqli($DB_HOST, $DB_USER, $DB_PASS, $DB_NAME);
+    if ($conn) {
+        $conn->set_charset("utf8mb4");
     }
+} catch (mysqli_sql_exception $e) {
+    die("
+        <div style='padding: 20px; border: 2px solid red; background-color: #fee; font-family: sans-serif;'>
+            <h2>❌ CRITICAL DATABASE CONNECTION ERROR!</h2>
+            <p>Your database connection failed. Error: " . htmlspecialchars($e->getMessage()) . "</p>
+            <p><strong>FIX:</strong> Ensure MySQL is running and your database 'shop_db' exists.</p>
+        </div>
+    ");
 }
-// ------------------------------------------------------------------
 
-// =====================================
-// === CART MANAGEMENT LOGIC (ONLY FOR FALLBACK/FAILOVER) ===
-// =====================================
+// --- ADMIN CREDENTIALS ---
+$ADMIN_EMAIL = 'houtsoksithchey@gmail.com';
+$ADMIN_PASSWORD_PLAINTEXT = '123chey';
 
-// 1. ADD TO CART Logic (From product card) - KEPT FOR FALLBACK ONLY
-if (isset($_POST['add_to_cart']) && isset($_POST['product_id'])) {
-    $product_id_to_add = (int)$_POST['product_id'];
-    
-    if (!isset($_SESSION['cart'])) {
-        $_SESSION['cart'] = [];
-    }
-    
-    if (isset($_SESSION['cart'][$product_id_to_add])) {
-        $_SESSION['cart'][$product_id_to_add] = (int)$_SESSION['cart'][$product_id_to_add] + 1;
+$message = "";
+
+// 1. Handle Login Attempt
+if (isset($_POST['login'])) {
+    $email = trim($_POST['email']);
+    $password = $_POST['password'];
+
+    if ($email === $ADMIN_EMAIL && $password === $ADMIN_PASSWORD_PLAINTEXT) {
+        $_SESSION['admin_logged_in'] = true;
+        session_regenerate_id(true); 
+        header("Location: index.php"); 
+        exit(); 
     } else {
-        $_SESSION['cart'][$product_id_to_add] = 1;
+        $message = "❌ Invalid email or password.";
     }
-
-    // Redirect to prevent form resubmission on refresh
-    header("Location: index.php" . (!empty($_GET) ? '?' . http_build_query($_GET) : ''));
-    exit;
 }
 
-// 2. REMOVE ITEM Logic (From Cart Modal) - KEPT FOR FALLBACK ONLY
-if (isset($_POST['remove_item']) && isset($_POST['product_id_remove'])) {
-    $product_id_remove = (int)$_POST['product_id_remove'];
-    
-    if (isset($_SESSION['cart'][$product_id_remove])) {
-        unset($_SESSION['cart'][$product_id_remove]);
-    }
-    
-    // Redirect to prevent form resubmission on refresh
-    header("Location: index.php" . (!empty($_GET) ? '?' . http_build_query($_GET) : ''));
-    exit;
+// 2. Handle Logout
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header("Location: index.php");
+    exit();
 }
-// =====================================
-// === END FALLBACK CART MANAGEMENT ===
-// =====================================
 
-
-// 3. CART FETCH AND CALCULATION (For Initial Modal Display - this will be overwritten by AJAX)
-$cart_details = [];
-$cart_total = 0.00;
-$simple_cart = $_SESSION['cart'] ?? [];
-$cart_count = count(array_keys($simple_cart)); 
-
-if ($cart_count > 0) {
-    $cart_product_ids = array_keys($simple_cart);
-    $sql_in = implode(',', array_map('intval', $cart_product_ids));
-    
-    // Check if $conn is a valid object before using it
-    if (isset($conn) && method_exists($conn, 'query')) {
-        $result_cart = $conn->query("SELECT id, name, price, image_path, stock_qty FROM products WHERE id IN ({$sql_in})");
-
-        if ($result_cart && $result_cart->num_rows > 0) {
-            while ($product_data = $result_cart->fetch_assoc()) {
-                $product_id = $product_data['id'];
-                $qty = $simple_cart[$product_id]; 
+// 3. Check Authentication and Display Login Form
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Admin Login</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+            * { font-family: 'Inter', sans-serif; }
+            body { background-color: #f3f4f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        </style>
+    </head>
+    <body>
+        <div class="w-full max-w-md">
+            <div class="bg-white p-8 rounded-xl shadow-2xl border border-gray-100">
+                <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">Admin Panel Login</h2>
                 
-                if ($qty > 0) {
-                    $line_total = (float)$product_data['price'] * (int)$qty;
-                    $cart_total += $line_total;
+                <?php if (!empty($message)): ?>
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
+                        <span class="block sm:inline"><?= htmlspecialchars($message) ?></span>
+                    </div>
+                <?php endif; ?>
 
-                    $cart_details[$product_id] = [
-                        'name' => $product_data['name'],
-                        'price' => $product_data['price'],
-                        'image_path' => $product_data['image_path'],
-                        'qty' => $qty,
-                        'line_total' => $line_total
-                    ];
-                }
+                <form method="post" action="index.php">
+                    <div class="mb-4">
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input type="email" name="email" id="email" value="<?= htmlspecialchars($ADMIN_EMAIL) ?>" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" required>
+                    </div>
+                    <div class="mb-6">
+                        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input type="password" name="password" id="password" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" required>
+                    </div>
+                    <div>
+                        <button type="submit" name="login" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-lg font-semibold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150">
+                            Login
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </body>
+    </html>
+    <?php
+    exit(); 
+}
+
+// --------------------------------------------------------------------
+// CODE BELOW THIS LINE IS ONLY EXECUTED IF THE ADMIN IS LOGGED IN
+// --------------------------------------------------------------------
+
+$current_view = filter_input(INPUT_GET, 'view', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?? 'products';
+$target_dir_name = "product_images";
+$target_dir = __DIR__ . DIRECTORY_SEPARATOR . $target_dir_name . DIRECTORY_SEPARATOR; 
+
+// --- Category Setup ---
+$categories_list = [];
+$sub_category_names = [];
+if ($conn) {
+    $categories_list['All'] = 0; 
+    try {
+        $cat_result = $conn->query("SELECT id, name FROM categories ORDER BY name ASC");
+        if ($cat_result) {
+            while ($row = $cat_result->fetch_assoc()) {
+                $categories_list[$row['name']] = $row['id'];
             }
+            $cat_result->free();
         }
-        if (isset($result_cart) && method_exists($result_cart, 'close')) { @$result_cart->close(); }
+    } catch (mysqli_sql_exception $e) {
+        $message .= "⚠️ Error fetching categories (Table 'categories' likely missing): " . htmlspecialchars($e->getMessage());
     }
+}
+foreach ($parent_categories as $subs) {
+    $sub_category_names = array_merge($sub_category_names, $subs);
 }
 
 
-// --- Category & Product Fetching Logic (Unchanged) ---
-$categories_map = []; 
-$categories_list = ['All']; 
-$current_parent_category = null; 
+// --- GLOBAL ACTION HANDLERS (Product & User) ---
 
-if (isset($conn) && method_exists($conn, 'query')) {
-    $cat_result = $conn->query("SELECT id, name FROM categories ORDER BY name ASC");
-    if ($cat_result && $cat_result->num_rows > 0) {
-        while ($row = $cat_result->fetch_assoc()) {
-            $categories_map[$row['name']] = $row['id'];
+// 1. Handle User Deletion (NEW LOGIC)
+if (isset($_POST['remove_user'])) {
+    $user_id = filter_input(INPUT_POST, 'user_id', FILTER_VALIDATE_INT);
+    if ($user_id) {
+        try {
+            // Note: In a real app, you should check for associated orders and delete/reassign them first.
+            $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+            $stmt->bind_param("i", $user_id);
             
-            $is_sub_category = false;
-            foreach ($parent_categories as $sub_cats) {
-                if (in_array($row['name'], $sub_cats)) {
-                    $is_sub_category = true;
-                    break;
-                }
+            if ($stmt->execute()) {
+                $message = "🗑️ User ID {$user_id} removed successfully.";
+                header("Location: index.php?view=users&msg=" . urlencode($message));
+                exit();
             }
-            if (!$is_sub_category) {
-                $categories_list[] = $row['name'];
-            }
-        }
-    }
-} else {
-    $categories_list = array_merge(['All'], array_filter(array_values($GLOBALS['categories_mock_array'] ?? []), function($name) use ($parent_categories) {
-        foreach ($parent_categories as $sub_cats) {
-            if (in_array($name, $sub_cats)) {
-                return false;
-            }
-        }
-        return true;
-    }));
-    // Note: The mock object itself should be accessed via $GLOBALS['conn'] to avoid scope issues in the mock context
-    $categories_map = $GLOBALS['conn']->categories_map ?? [];
-}
-
-$current_selection_name = $_GET['cat'] ?? 'All'; 
-$base_category_to_filter = $current_selection_name; 
-$current_category_id = null; 
-
-if (array_key_exists($current_selection_name, $parent_categories)) {
-    $current_parent_category = $current_selection_name;
-} else {
-    foreach ($parent_categories as $parent_name => $sub_cats) {
-        if (in_array($current_selection_name, $sub_cats)) {
-            $base_category_to_filter = $current_selection_name;
-            $current_parent_category = $parent_name; 
-            break;
+            $stmt->close();
+        } catch (mysqli_sql_exception $e) {
+             $message = "❌ Database error on user deletion: " . htmlspecialchars($e->getMessage());
         }
     }
 }
 
-if ($base_category_to_filter !== 'All') {
-    $current_category_id = $categories_map[$base_category_to_filter] ?? null; 
-}
+// --------------------------------------------------------------------
+// PRODUCT MANAGEMENT LOGIC
+// --------------------------------------------------------------------
+$products_result = null;
+$total_products = 0;
+$low_stock_count = 0;
 
-$result = (object)['num_rows' => 0]; 
-
-if (isset($conn) && method_exists($conn, 'query')) {
-    $sql = "SELECT id, name, price, image_path, details, category_id FROM products"; 
-
-    if ($current_category_id !== null) {
-        $safe_id = (int)$current_category_id;
-        $filter_clause = " WHERE category_id = {$safe_id}";
-
-        if (array_key_exists($base_category_to_filter, $parent_categories)) {
-            $sub_category_ids = array_filter(array_map(function($sub_name) use ($categories_map) {
-                return $categories_map[$sub_name] ?? null;
-            }, $parent_categories[$base_category_to_filter]));
-            
-            if (!empty($sub_category_ids)) {
-                $sub_id_list = implode(',', array_map('intval', $sub_category_ids));
-                $filter_clause = " WHERE category_id = {$safe_id} OR category_id IN ({$sub_id_list})";
-            } else {
-                $filter_clause = " WHERE category_id = {$safe_id}";
-            }
-        }
-        
-        $sql .= $filter_clause;
-    }
+if ($current_view === 'products') {
     
-    $sql .= " ORDER BY name"; 
-    $result = $conn->query($sql);
+    $current_category_id = filter_input(INPUT_GET, 'cat_id', FILTER_VALIDATE_INT) ?? 0;
+    $current_category_name = array_search($current_category_id, $categories_list) ?: 'Unknown Category';
 
-    if ($result === false && isset($GLOBALS['products_mock'])) {
-        $result = $GLOBALS['conn']->query(""); 
+    // 2. Handle Product Addition
+    if (isset($_POST['add_product'])) {
+        $name = trim(filter_input(INPUT_POST, 'name', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $price = filter_input(INPUT_POST, 'price', FILTER_VALIDATE_FLOAT);
+        $stock_qty = filter_input(INPUT_POST, 'stock_qty', FILTER_VALIDATE_INT) ?? 0;
+        $category_id = filter_input(INPUT_POST, 'category_id', FILTER_VALIDATE_INT);
+        $details = trim(filter_input(INPUT_POST, 'details', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $image_path_db = null;
+
+        if ($name && $price !== false && $category_id !== false && $category_id > 0) {
+            if (isset($_FILES['image']) && $_FILES['image']['error'] == 0) {
+                $image_name = basename($_FILES["image"]["name"]);
+                $file_extension = strtolower(pathinfo($image_name, PATHINFO_EXTENSION));
+                $new_file_name = uniqid('prod_') . '.' . $file_extension;
+                $image_path_db = $target_dir_name . '/' . $new_file_name;
+                
+                if (move_uploaded_file($_FILES["image"]["tmp_name"], __DIR__ . '/../' . $image_path_db)) {
+                    // Success
+                } else {
+                    $message .= "⚠️ Error uploading file. Check 'product_images' folder permissions.";
+                    $image_path_db = null; 
+                }
+            }
+            
+            try {
+                $stmt = $conn->prepare("INSERT INTO products (name, price, stock_qty, category_id, image_path, details) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sdiiss", $name, $price, $stock_qty, $category_id, $image_path_db, $details);
+                
+                if ($stmt->execute()) {
+                    $message = "✅ Product '{$name}' added successfully!";
+                } else {
+                    $message = "❌ Database error: " . htmlspecialchars($conn->error);
+                }
+                $stmt->close();
+            } catch (mysqli_sql_exception $e) {
+                 $message = "❌ Database error on insert (Table 'products' likely missing): " . htmlspecialchars($e->getMessage());
+            }
+        } else {
+            $message = "⚠️ Please fill out all required fields correctly (including selecting a category).";
+        }
     }
 
-} elseif (isset($GLOBALS['products_mock'])) {
-    $result = $GLOBALS['conn']->query(""); 
+    // 3. Handle Product Deletion and Stock Update
+    if (isset($_POST['update_stock']) || isset($_POST['remove_product'])) {
+        $product_id = filter_input(INPUT_POST, 'product_id', FILTER_VALIDATE_INT);
+        if ($product_id) {
+            if (isset($_POST['remove_product'])) {
+                try {
+                    $stmt = $conn->prepare("DELETE FROM products WHERE id = ?");
+                    $stmt->bind_param("i", $product_id);
+                    if ($stmt->execute()) {
+                        $message = "🗑️ Product ID {$product_id} removed.";
+                        header("Location: index.php?view=products&cat_id={$current_category_id}&msg=" . urlencode($message));
+                        exit();
+                    }
+                    $stmt->close();
+                } catch (mysqli_sql_exception $e) {
+                     $message = "❌ Database error on delete: " . htmlspecialchars($e->getMessage());
+                }
+            
+            } elseif (isset($_POST['update_stock'])) {
+                $change = (int)$_POST['stock_change']; 
+                try {
+                    $stmt = $conn->prepare("UPDATE products SET stock_qty = stock_qty + ? WHERE id = ?");
+                    $stmt->bind_param("ii", $change, $product_id);
+                    
+                    if ($stmt->execute()) {
+                        $message = "📈 Stock updated for product ID {$product_id}.";
+                        header("Location: index.php?view=products&cat_id={$current_category_id}&msg=" . urlencode($message));
+                        exit();
+                    }
+                    $stmt->close();
+                } catch (mysqli_sql_exception $e) {
+                     $message = "❌ Database error on stock update: " . htmlspecialchars($e->getMessage());
+                }
+            }
+        }
+    }
+
+    // 4. Handle Product Editing/Update 
+    if (isset($_POST['edit_product'])) {
+        $product_id = filter_input(INPUT_POST, 'product_id', FILTER_VALIDATE_INT);
+        $name = trim(filter_input(INPUT_POST, 'edit_name', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $price = filter_input(INPUT_POST, 'edit_price', FILTER_VALIDATE_FLOAT);
+        $stock_qty = filter_input(INPUT_POST, 'edit_stock_qty', FILTER_VALIDATE_INT);
+        $category_id = filter_input(INPUT_POST, 'edit_category_id', FILTER_VALIDATE_INT);
+        $details = trim(filter_input(INPUT_POST, 'edit_details', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $current_image_path = filter_input(INPUT_POST, 'current_image_path', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+        $image_path_db = $current_image_path; 
+
+        if ($product_id && $name && $price !== false && $category_id !== false && $category_id > 0) {
+            
+            if (isset($_FILES['edit_image']) && $_FILES['edit_image']['error'] == 0) {
+                $image_name = basename($_FILES["edit_image"]["name"]);
+                $file_extension = strtolower(pathinfo($image_name, PATHINFO_EXTENSION));
+                $new_file_name = uniqid('prod_') . '.' . $file_extension;
+                $image_path_db = $target_dir_name . '/' . $new_file_name;
+
+                if (move_uploaded_file($_FILES["edit_image"]["tmp_name"], __DIR__ . '/../' . $image_path_db)) {
+                    if ($current_image_path && file_exists(__DIR__ . '/../' . $current_image_path)) {
+                        @unlink(__DIR__ . '/../' . $current_image_path);
+                    }
+                } else {
+                    $image_path_db = $current_image_path; 
+                }
+            }
+            
+            try {
+                $stmt = $conn->prepare("UPDATE products SET name = ?, price = ?, stock_qty = ?, category_id = ?, image_path = ?, details = ? WHERE id = ?");
+                $stmt->bind_param("sdiissi", $name, $price, $stock_qty, $category_id, $image_path_db, $details, $product_id);
+                
+                if ($stmt->execute()) {
+                    $message = "✅ Product ID **{$product_id}** updated successfully!";
+                    header("Location: index.php?view=products&cat_id={$current_category_id}&msg=" . urlencode($message));
+                    exit();
+                }
+                $stmt->close();
+            } catch (mysqli_sql_exception $e) {
+                 $message = "❌ Database error on update: " . htmlspecialchars($e->getMessage());
+            }
+        }
+    }
+
+    // Check for and display messages passed via URL from the redirection
+    if (isset($_GET['msg'])) {
+        $message = urldecode($_GET['msg']);
+    }
+
+    // 5. Fetch Products & Stats
+    $sql = "SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON p.category_id = c.id";
+    $products_result = false;
+    $stmt_products = null;
+
+    if ($current_category_id !== 0) { 
+        $sql .= " WHERE p.category_id = ?"; 
+        $stmt_products = $conn->prepare($sql . " ORDER BY p.id DESC");
+        $stmt_products->bind_param('i', $current_category_id);
+        $stmt_products->execute(); 
+        $products_result = $stmt_products->get_result();
+    } else {
+        $products_result = $conn->query($sql . " ORDER BY p.id DESC");
+    }
+
+    $total_products = $conn->query("SELECT COUNT(*) FROM products")->fetch_row()[0] ?? 0;
+    $low_stock_count = $conn->query("SELECT COUNT(*) FROM products WHERE stock_qty < 5")->fetch_row()[0] ?? 0;
+} 
+
+// --------------------------------------------------------------------
+// USER MANAGEMENT LOGIC
+// --------------------------------------------------------------------
+$users_list = [];
+$total_users = 0;
+if ($current_view === 'users' && $conn) {
+    try {
+        $users_result = $conn->query("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC");
+        if ($users_result) {
+            $total_users = $users_result->num_rows;
+            while ($row = $users_result->fetch_assoc()) {
+                $users_list[] = $row;
+            }
+            $users_result->free();
+        }
+    } catch (mysqli_sql_exception $e) {
+        $message .= "⚠️ Error fetching users: " . htmlspecialchars($e->getMessage());
+    }
+
+    // Check for and display messages passed via URL from the redirection (user view)
+    if (isset($_GET['msg'])) {
+        $message = urldecode($_GET['msg']);
+    }
 }
-// --- End Category & Product Fetching Logic ---
+// --------------------------------------------------------------------
+
 ?>
 
 <!DOCTYPE html>
@@ -321,703 +358,586 @@ if (isset($conn) && method_exists($conn, 'query')) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Fashion Shop | Modern Collection</title>
-    
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Admin Dashboard | <?= $current_view === 'users' ? 'User Management' : 'Product Management' ?></title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        :root {
-            --primary-color: #000000;
-            --secondary-color: #333333;
-            --accent-color: #cc0000; 
-            --white: #ffffff;
-            --light-gray: #f9f9f9;
-        }
-
-        * {
-            box-sizing: border-box;
-            font-family: 'Montserrat', sans-serif;
-        }
-
-        body {
-            background-color: var(--white);
-            color: var(--secondary-color);
-        }
-        
-        .navbar {
-            padding: 15px 0;
-            border-bottom: 1px solid #eee;
-        }
-        .navbar-brand {
-            font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--primary-color) !important;
-        }
-
-        .hero-section {
-            background-color: var(--primary-color); 
-            padding: 100px 0 60px; 
-            text-align: center;
-            border-bottom: 1px solid var(--secondary-color);
-        }
-        .hero-section .container {
-            min-height: 150px; 
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .glitch-text {
-            font-size: 5em; 
-            font-weight: 900;
-            color: var(--white);
-            position: relative;
-            text-transform: uppercase;
-            font-family: 'Montserrat', sans-serif; 
-            text-shadow: 0 0 10px #ff00ff, 0 0 20px #00ffff; 
-            animation: glitch-main 2s infinite alternate;
-            line-height: 1; 
-        }
-
-        .glitch-text::before,
-        .glitch-text::after {
-            content: attr(data-text); 
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0; 
-        }
-
-        .glitch-text::before {
-            left: 2px;
-            text-shadow: -2px 0 #ff00ff; 
-            animation: glitch-secondary-1 3.5s infinite alternate-reverse;
-        }
-
-        .glitch-text::after {
-            left: -2px;
-            text-shadow: 2px 0 #00ffff; 
-            animation: glitch-secondary-2 3.5s infinite alternate;
-        }
-
-        @media (max-width: 768px) {
-            .glitch-text {
-                font-size: 3em;
-            }
-        }
-
-
-        .category-filter {
-            padding: 30px 0 20px; 
-            text-align: center;
-        }
-        .cat-btn {
-            border: 1px solid var(--secondary-color);
-            color: var(--secondary-color);
-            background-color: var(--white);
-            padding: 8px 18px;
-            margin: 5px;
-            border-radius: 50px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            transition: all 0.3s;
-        }
-        .cat-btn:hover {
-            background-color: var(--primary-color);
-            color: var(--white);
-            border-color: var(--primary-color);
-        }
-        .cat-btn.active {
-            background-color: var(--primary-color);
-            color: var(--white);
-            border-color: var(--primary-color);
-        }
-
-        .sub-category-bar {
-            background-color: #eee;
-            padding: 15px 0;
-            margin-top: 15px;
-            border-top: 1px solid #ddd;
-            border-bottom: 1px solid #ddd;
-        }
-        .sub-cat-btn {
-            padding: 6px 15px;
-            margin: 0 5px;
-            border-radius: 50px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            background-color: #fff;
-            color: var(--secondary-color);
-            border: 1px solid #ccc;
-            transition: all 0.3s; 
-        }
-        .sub-cat-btn:hover {
-             transform: translateY(-2px); 
-             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        .sub-cat-btn.active {
-            background-color: var(--accent-color);
-            color: var(--white);
-            border-color: var(--accent-color);
-        }
-        
-        .product-card {
-            border: none;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        .product-card:hover {
-            transform: translateY(-5px); 
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
-        }
-        .product-image-wrapper {
-            overflow: hidden;
-            position: relative;
-            padding-top: 133.33%; 
-        }
-        .product-image {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.5s ease;
-        }
-        .product-card:hover .product-image {
-            transform: scale(1.05);
-        }
-        .product-info {
-            padding: 15px 0 20px 0;
-            text-align: center;
-        }
-        .product-name {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        .product-price {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--accent-color);
-            margin-bottom: 15px;
-        }
-
-        .buy-btn {
-            background-color: var(--primary-color);
-            color: var(--white);
-            border: 1px solid var(--primary-color);
-            border-radius: 0; 
-            padding: 10px 15px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: background-color 0.3s, transform 0.3s, box-shadow 0.3s;
-        }
-        .buy-btn:hover {
-            background-color: var(--secondary-color);
-            color: var(--white);
-            transform: scale(1.02); 
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        
-        /* Glitch Animation Keyframes */
-        @keyframes glitch-main {
-            0% { transform: translate(0); }
-            20% { transform: translate(-3px, 3px); }
-            40% { transform: translate(-3px, -3px); }
-            60% { transform: translate(3px, 3px); }
-            80% { transform: translate(3px, -3px); }
-            100% { transform: translate(0); }
-        }
-
-        @keyframes glitch-secondary-1 {
-            0% { clip: rect(44px, 9999px, 56px, 0); opacity: 0; }
-            40% { clip: rect(44px, 9999px, 56px, 0); opacity: 1; }
-            50% { clip: rect(110px, 9999px, 120px, 0); opacity: 0; }
-            90% { clip: rect(110px, 9999px, 120px, 0); opacity: 1; }
-            100% { clip: rect(0, 0, 0, 0); opacity: 0; }
-        }
-
-        @keyframes glitch-secondary-2 {
-            0% { clip: rect(10px, 9999px, 20px, 0); opacity: 1; }
-            30% { clip: rect(10px, 9999px, 20px, 0); opacity: 0; }
-            40% { clip: rect(70px, 9999px, 80px, 0); opacity: 1; }
-            80% { clip: rect(70px, 9999px, 80px, 0); opacity: 0; }
-            100% { clip: rect(0, 0, 0, 0); opacity: 0; }
-        }
-        
-        .contact-icon-btn {
-            background-color: var(--primary-color);
-            color: var(--white);
-            border-radius: 50px;
-            transition: all 0.3s ease;
-        }
-        .contact-icon-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-        }
-        .facebook-btn { background-color: #1877f2; border-color: #1877f2; }
-        .telegram-btn { background-color: #0088cc; border-color: #0088cc; }
-        
-        .cart-item-row {
-            display: flex;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid #eee;
-        }
-        .cart-item-img {
-            width: 60px;
-            height: 60px;
-            object-fit: cover;
-            margin-right: 15px;
-            border-radius: 4px;
-        }
-        .cart-item-details {
-            flex-grow: 1;
-        }
-        .cart-item-name {
-            font-weight: 600;
-            font-size: 1rem;
-            margin: 0;
-        }
-        .cart-item-price {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        .cart-item-actions {
-            text-align: right;
-            min-width: 100px;
-        }
-        #cart-modal-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 0;
-            border-top: 1px solid #eee;
-        }
-        #cart-total-price {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--accent-color);
-        }
+        :root { --primary-blue: #3b82f6; }
+        * { font-family: 'Inter', sans-serif; }
+        body { background-color: #f9fafb; }
+        .sidebar { transition: width 0.3s ease; width: 64px; }
+        @media (min-width: 768px) { .sidebar:hover { width: 256px; } }
+        .sidebar-item-text { opacity: 0; transition: opacity 0.3s ease; white-space: nowrap; }
+        @media (min-width: 768px) { .sidebar:hover .sidebar-item-text { opacity: 1; } }
+        .main-content { margin-left: 64px; transition: margin-left 0.3s ease; }
+        @media (min-width: 768px) { .sidebar:hover ~ .main-content { margin-left: 256px; } }
+        @media (max-width: 768px) { .sidebar { width: 0; display: none; } .main-content { margin-left: 0; } }
+        .cat-btn-admin.active { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
+        .product-image { width: 48px; height: 48px; object-fit: cover; }
+        .select-parent-option { font-weight: bold; background-color: #f3f4f6; color: #1f2937; }
     </style>
 </head>
-<body>
+<body class="min-h-screen">
 
-    <nav class="navbar navbar-expand-lg bg-white sticky-top">
-        <div class="container">
-            <a class="navbar-brand" href="#">SHOPPING</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav align-items-lg-center">
-                    <li class="nav-item"><a class="nav-link" href="?cat=All">Shop</a></li>
-                    <li class="nav-item"><a id="contact-link" class="nav-link" href="#contact-section">Contact</a></li>
-                    
-                    <li class="nav-item d-none d-lg-block"> | </li> 
-                    
-                    <li class="nav-item me-3">
-                         <a class="nav-link btn btn-sm contact-icon-btn" 
-                            href="account.php" 
-                            style="background-color: var(--secondary-color); color: var(--white); padding: 5px 12px; font-weight: 600; border-radius: 4px;">
-                            <i class="fas fa-user-circle me-1"></i> Account
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                         <span class="navbar-text me-2" style="font-size: 0.9rem;">
-                            Hello, <strong><?= htmlspecialchars($_SESSION['user_name'] ?? 'User') ?></strong>!
-                        </span>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="?logout=true" style="font-weight: 700; color: var(--accent-color);">
-                            <i class="fas fa-sign-out-alt"></i> Logout
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#shoppingCartModal" style="font-weight: 700;">
-                            <i class="fas fa-shopping-cart"></i> Cart (<span id="cart-item-count"><?= $cart_count ?></span>)
-                        </a>
-                    </li>
-                </ul>
-            </div>
+    <nav class="fixed top-0 left-0 right-0 h-14 bg-white shadow-lg z-30 flex items-center justify-between px-4">
+        <a class="text-xl font-extrabold text-gray-800 tracking-wider" href="#">
+            <i class="fas fa-layer-group text-primary-blue mr-2"></i> ADMIN CONSOLE
+        </a>
+        <div class="flex items-center space-x-4">
+             <a href="../shopping/index.php" target="_blank" class="text-sm font-semibold text-gray-600 hover:text-primary-blue transition">
+                 <i class="fas fa-store mr-1"></i> View Shop
+             </a>
+            <a class="text-sm font-semibold px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600 transition shadow-md" href="?logout=true">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
         </div>
     </nav>
 
-    <div class="hero-section">
-        <div class="container">
-            <div class="glitch-text" data-text="JUST DO IT">CY SHOPPING WEBSITE TRUSTY AND SAFETY</div>
+    <div class="sidebar fixed top-14 bottom-0 left-0 bg-gray-800 z-20 flex-col p-2 text-gray-300 hover:shadow-xl hidden md:flex">
+        <div class="sidebar-header border-b border-gray-700 py-3 mb-2">
+            <span class="text-lg font-bold ml-1 text-white sidebar-item-text">FASHION SHOP</span>
         </div>
-    </div>
-    
-    <div class="category-filter">
-        <div class="container">
-            <?php foreach ($categories_list as $label): ?>
-                <a href="?cat=<?= urlencode($label) ?>" class="btn cat-btn <?= ($base_category_to_filter === $label && !array_key_exists($label, $parent_categories)) || $current_parent_category === $label ? 'active' : '' ?>">
-                    <?= htmlspecialchars($label) ?>
+        <ul class="flex flex-col space-y-1">
+            <li class="rounded-lg <?= $current_view === 'products' ? 'bg-gray-700' : 'hover:bg-gray-700' ?>"> 
+                <a class="flex items-center p-3 <?= $current_view === 'products' ? 'text-white font-semibold' : 'text-gray-300 hover:text-white' ?>" href="index.php?view=products">
+                    <i class="fas fa-chart-bar w-6"></i>
+                    <span class="ml-3 sidebar-item-text">Product Mgmt</span>
                 </a>
-            <?php endforeach; ?>
-        </div>
-    </div>
-    
-    <?php 
-    $sub_cats_to_display = [];
-    $active_sub_label = $current_selection_name;
-
-    if ($current_parent_category !== null && array_key_exists($current_parent_category, $parent_categories)) {
-           $sub_cats_to_display = $parent_categories[$current_parent_category];
-    }
-    
-    if (!empty($sub_cats_to_display)): 
-    ?>
-    <div class="sub-category-bar">
-        <div class="container text-center">
-            <h6 class="text-muted mb-3" style="font-weight: 500;">Filter **<?= htmlspecialchars($current_parent_category) ?>** by:</h6>
-            <?php foreach ($sub_cats_to_display as $sub_label): ?>
-                <a href="?cat=<?= urlencode($sub_label) ?>" class="btn sub-cat-btn <?= ($active_sub_label === $sub_label) ? 'active' : '' ?>">
-                    <?= htmlspecialchars($sub_label) ?>
-                </a>
-            <?php endforeach; ?>
-        </div>
-    </div>
-    <?php endif; ?>
-    
-    <div class="container py-4">
-        <p class="mt-4 text-center text-muted" style="font-size: 0.9rem;">
+            </li>
             
-        </p>
-        
-        <?php if($result->num_rows == 0): ?>
-            <div class="alert alert-warning text-center p-5 my-5 shadow-sm">
-                <h2><i class="fas fa-exclamation-triangle"></i> No Products Found!</h2>
-                <p class="lead">No products match the category: <strong><?= htmlspecialchars($base_category_to_filter) ?></strong>.</p>
-            </div>
-        <?php else: ?>
-            <h3 class="text-center mb-5" style="font-weight: 300; letter-spacing: 3px;">
-                <?= ($base_category_to_filter === 'All' ? 'ALL PRODUCTS' : strtoupper(htmlspecialchars($base_category_to_filter)) . ' COLLECTION') ?>
-            </h3>
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4 mb-5">
+            <li class="rounded-lg <?= $current_view === 'users' ? 'bg-gray-700' : 'hover:bg-gray-700' ?>"> 
+                <a class="flex items-center p-3 <?= $current_view === 'users' ? 'text-white font-semibold' : 'text-gray-300 hover:text-white' ?>" href="index.php?view=users">
+                    <i class="fas fa-users w-6"></i>
+                    <span class="ml-3 sidebar-item-text">User Management</span>
+                </a>
+            </li>
+            
+            <?php if ($current_view === 'products'): ?>
                 <?php 
-                if (method_exists($result, 'fetch_assoc')): 
-                    while($product = $result->fetch_assoc()): 
-                        $video_src = null; 
-                        // FIX: Removed "../admin/" from the image path
-                        $image_src = "../" . htmlspecialchars($product['image_path']); 
+                $category_icons = ['Clothing' => 'fas fa-tshirt', 'Shoes' => 'fas fa-shoe-prints', 'Accessories' => 'fas fa-glasses', 'Skin Care' => 'fas fa-spa', 'Pants' => 'fas fa-socks'];
+                
+                foreach ($categories_list as $name => $id): 
+                    if ($id > 0):
+                        $icon_class = $category_icons[$name] ?? 'fas fa-tag';
                 ?>
-                    <div class="col">
-                        <div class="card product-card">
-                            <div class="product-image-wrapper">
-                                <?php if (!empty($video_src)): ?>
-                                    <video autoplay loop muted playsinline 
-                                        class="product-image" 
-                                        poster="<?= $image_src ?>" 
-                                        title="<?= htmlspecialchars($product['name']) ?>">
-                                        <source src="<?= htmlspecialchars($video_src) ?>" type="video/mp4">
-                                        Your browser does not support the video tag.
-                                    </video>
-                                <?php else: ?>
-                                    <img src="<?= $image_src ?>" 
-                                        alt="<?= htmlspecialchars($product['name']) ?>" 
-                                        class="product-image" 
-                                        loading="lazy" 
-                                        onerror="this.onerror=null; this.src='https://via.placeholder.com/600x800?text=No+Image';"> 
-                                <?php endif; ?>
-                            </div>
-                            
-                            <div class="product-info card-body">
-                                <h5 class="product-name"><?= htmlspecialchars($product['name']) ?></h5>
-                                <div class="product-price">$<?= number_format($product['price'], 2) ?></div>
-                                
-                                <div class="d-grid gap-2 d-sm-flex justify-content-center">
-                                    <button type="button" 
-                                        class="btn btn-outline-dark detail-btn w-100"
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#productDetailModal"
-                                        data-product-name="<?= htmlspecialchars($product['name']) ?>"
-                                        data-product-details="<?= htmlspecialchars($product['details'] ?? 'No details provided.') ?>"
-                                        style="border-radius: 0; padding: 10px 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
-                                        <i class="fas fa-info-circle me-1"></i> Details
-                                    </button>
-                                    <form method="post" class="d-grid w-100 add-to-cart-form">
-                                        <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id']) ?>">
-                                        <input type="hidden" name="add_to_cart" value="1"> 
-                                        <button type="submit" class="buy-btn btn" style="background-color: var(--secondary-color);">
-                                            ADD TO CART
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <li class="rounded-lg hover:bg-gray-700">
+                        <a class="flex items-center p-3 text-gray-300 hover:text-white" href="index.php?view=products&cat_id=<?= htmlspecialchars($id) ?>">
+                            <i class="<?= htmlspecialchars($icon_class) ?> w-6"></i>
+                            <span class="ml-3 sidebar-item-text"><?= htmlspecialchars($name) ?></span>
+                        </a>
+                    </li>
                 <?php 
-                    endwhile; 
-                endif; 
-                ?> 
+                    endif;
+                endforeach; 
+                ?>
+            <?php endif; ?>
+            </ul>
+    </div>
+
+    <div class="main-content pt-16 p-4 md:p-8 min-h-screen">
+        
+        <h1 class="text-3xl font-extrabold mb-6 text-gray-800">
+            <?= $current_view === 'users' ? 'User Management' : 'Product Management Dashboard' ?>
+        </h1>
+
+        <?php if(!empty($message)): ?>
+            <?php 
+                $class = strpos($message, '✅') !== false || strpos($message, '📈') !== false || strpos($message, '🗑️') !== false ? 'bg-green-100 border-green-400 text-green-700' : (strpos($message, '❌') !== false ? 'bg-red-100 border-red-400 text-red-700' : 'bg-yellow-100 border-yellow-400 text-yellow-700');
+            ?>
+            <div class="p-4 mb-6 border-l-4 <?= $class ?> rounded-xl shadow-sm" role="alert">
+                <p class="font-bold">Notification</p>
+                <p><?= htmlspecialchars($message) ?></p>
             </div>
         <?php endif; ?>
-    </div>
-    
-    <div id="contact-section" class="container py-5 my-5 text-center border-top">
-        <h3 class="display-6 fw-bold mb-4" style="color: var(--primary-color);">Get In Touch</h3>
-        <p class="lead mb-4" style="font-weight: 400;">Connect with us instantly via our direct messaging channels.</p>
         
-        <div class="d-flex justify-content-center flex-column flex-sm-row gap-3">
-            <a href="https://www.facebook.com/share/17KB2ZNU2s/?mibextid=wwXIfr" target="_blank" class="btn btn-lg contact-icon-btn facebook-btn">
-                <i class="fab fa-facebook-f me-2"></i> Message on Facebook
-            </a>
-            <a href="https://t.me/cheycutie123" target="_blank" class="btn btn-lg contact-icon-btn telegram-btn">
-                <i class="fab fa-telegram-plane me-2"></i> Chat on Telegram
-            </a>
-        </div>
+        <?php if ($current_view === 'products'): ?>
         
-    </div>
-    <footer class="bg-light border-top mt-5">
-        <div class="container text-center py-4">
-            <p class="mb-0 text-muted">  CS SHOPPING.</p>
-        </div>
-    </footer>
-    
-<div class="modal fade" id="productDetailModal" tabindex="-1" aria-labelledby="productDetailModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title text-muted" id="productDetailModalLabel">Product Details & Description</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <h4 id="modal-product-name" class="fw-bold mb-3 text-dark"></h4>
-        <div id="modal-product-details" class="text-secondary" style="white-space: pre-wrap; line-height: 1.6;"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="modal fade" id="shoppingCartModal" tabindex="-1" aria-labelledby="shoppingCartModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold" id="shoppingCartModalLabel"><i class="fas fa-shopping-cart me-2"></i> Your Shopping Cart</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-4">
-                <div class="alert alert-info text-center" id="cart-initial-message">
-                    Loading cart contents...
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-primary-blue">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-medium text-gray-500">Total Products</p>
+                        <p class="text-3xl font-bold text-gray-900 mt-1"><?= $total_products ?></p>
+                    </div>
+                    <i class="fas fa-boxes text-3xl text-primary-blue opacity-70"></i>
                 </div>
             </div>
-            <div class="modal-footer justify-content-between" id="cart-modal-footer">
-                 </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-yellow-500">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-medium text-gray-500">Low Stock Items (< 5)</p>
+                        <p class="text-3xl font-bold text-yellow-600 mt-1"><?= $low_stock_count ?></p>
+                    </div>
+                    <i class="fas fa-exclamation-triangle text-3xl text-yellow-500 opacity-70"></i>
+                </div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-green-500 hover:bg-gray-50 transition duration-150 cursor-pointer" onclick="window.open('../shopping/index.php', '_blank');">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-medium text-gray-500">View Live Store</p>
+                        <p class="text-3xl font-bold text-green-600 mt-1">Go Shopping <i class="fas fa-arrow-right text-xl ml-2"></i></p>
+                    </div>
+                    <i class="fas fa-store text-3xl text-green-500 opacity-70"></i>
+                </div>
+            </div>
         </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800 border-b pb-2">
+                <i class="fas fa-plus-circle text-primary-blue mr-2"></i> Add New Product
+            </h2>
+            <form method="post" enctype="multipart/form-data">
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-gray-700">Name</label>
+                        <input type="text" name="name" id="name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    <div>
+                        <label for="category_id" class="block text-sm font-medium text-gray-700">Category</label>
+                        <select name="category_id" id="category_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                            <option value="">Select Category</option>
+                            <?php 
+                            foreach ($categories_list as $name => $id): 
+                                if ($id > 0):
+                                    $is_parent = array_key_exists($name, $parent_categories);
+                            ?>
+                                <option 
+                                    value="<?= htmlspecialchars($id) ?>" 
+                                    <?= $is_parent ? 'disabled class="select-parent-option"' : 'class="font-semibold"' ?>
+                                >
+                                    <?= htmlspecialchars($name) ?> <?= $is_parent ? '(Parent)' : '' ?>
+                                </option>
+                                <?php 
+                                    if ($is_parent):
+                                        foreach ($parent_categories[$name] as $sub_name):
+                                            if (isset($categories_list[$sub_name])):
+                                ?>
+                                                <option 
+                                                    value="<?= htmlspecialchars($categories_list[$sub_name]) ?>" 
+                                                    style="padding-left: 20px;"
+                                                    class="text-gray-700"
+                                                >
+                                                    &nbsp;&nbsp;&nbsp;— <?= htmlspecialchars($sub_name) ?>
+                                                </option>
+                                <?php 
+                                            endif;
+                                        endforeach;
+                                    endif;
+                                endif;
+                            endforeach; 
+                            ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="price" class="block text-sm font-medium text-gray-700">Price ($)</label>
+                        <input type="number" step="0.01" name="price" id="price" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    <div>
+                        <label for="stock_qty" class="block text-sm font-medium text-gray-700">Stock Qty</label>
+                        <input type="number" name="stock_qty" id="stock_qty" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" value="0" required>
+                    </div>
+                    <div>
+                        <label for="image" class="block text-sm font-medium text-gray-700">Image</label>
+                        <input type="file" name="image" id="image" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-blue file:text-white hover:file:bg-blue-600">
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <label for="details" class="block text-sm font-medium text-gray-700">Product Details</label>
+                    <textarea name="details" id="details" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" placeholder="Enter a detailed description of the product..."></textarea>
+                </div>
+                <div class="mt-6">
+                    <button type="submit" name="add_product" class="px-6 py-2 bg-primary-blue text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition">
+                        <i class="fas fa-save mr-2"></i> Save Product
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6">
+            <h2 class="text-xl font-semibold text-gray-800">
+                <i class="fas fa-list-ul mr-2 text-primary-blue"></i> Product List 
+                <span class="text-sm font-normal text-gray-500">(Category: <?= htmlspecialchars($current_category_name) ?>)</span>
+            </h2>
+            <div class="flex flex-wrap space-x-2 mt-4 md:mt-0">
+                <?php foreach ($categories_list as $name => $id): ?>
+                    <?php 
+                    if (in_array($name, $sub_category_names)) continue; 
+                    ?>
+                    <a href="?view=products&cat_id=<?= htmlspecialchars($id) ?>" class="cat-btn-admin px-3 py-1 text-sm font-medium rounded-full 
+                        <?= $current_category_id == $id ? 'bg-primary-blue text-white active shadow-blue-300/50' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 shadow-gray-300/50' ?>">
+                        <?= htmlspecialchars($name) ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-lg overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Image</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                        <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <?php 
+                    if ($products_result && $products_result->num_rows > 0):
+                        while ($product = $products_result->fetch_assoc()):
+                            $stock_class = $product['stock_qty'] < 5 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+                            $escaped_details = htmlspecialchars($product['details']); 
+                    ?>
+                    <tr class="hover:bg-gray-50 transition duration-150">
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900"><?= htmlspecialchars($product['id']) ?></td>
+                        <td class="px-3 py-4 whitespace-nowrap">
+                            <?php 
+                            $image_src = $product['image_path'] ? '../' . htmlspecialchars($product['image_path']) : 'https://via.placeholder.com/48?text=N/A';
+                            ?>
+                            <img class="product-image rounded-lg shadow-sm" src="<?= $image_src ?>" alt="Product Image">
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold"><?= htmlspecialchars($product['name']) ?></td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($product['category_name']) ?></td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">$<?= number_format($product['price'], 2) ?></td>
+                        <td class="px-3 py-4 whitespace-nowrap">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?= $stock_class ?>">
+                                <?= htmlspecialchars($product['stock_qty']) ?>
+                            </span>
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-center space-x-2 flex justify-center items-center">
+                            <button type="button" 
+                                    class="text-primary-blue hover:text-blue-700 transition edit-product-btn" 
+                                    title="Edit Product Details"
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#editProductModal"
+                                    data-id="<?= htmlspecialchars($product['id']) ?>"
+                                    data-name="<?= htmlspecialchars($product['name']) ?>"
+                                    data-price="<?= htmlspecialchars(number_format($product['price'], 2, '.', '')) ?>"
+                                    data-stock-qty="<?= htmlspecialchars($product['stock_qty']) ?>"
+                                    data-category-id="<?= htmlspecialchars($product['category_id']) ?>"
+                                    data-details="<?= $escaped_details ?>"
+                                    data-image-path="<?= htmlspecialchars($product['image_path']) ?>"
+                            >
+                                <i class="fas fa-edit text-lg"></i>
+                            </button>
+                            <form method="post" class="inline-block">
+                                <input type="hidden" name="view" value="products">
+                                <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id']) ?>">
+                                <input type="hidden" name="stock_change" value="1">
+                                <button type="submit" name="update_stock" class="text-green-600 hover:text-green-900 transition" title="Add 1 Stock">
+                                    <i class="fas fa-plus-square text-lg"></i>
+                                </button>
+                            </form>
+                            <form method="post" class="inline-block">
+                                <input type="hidden" name="view" value="products">
+                                <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id']) ?>">
+                                <input type="hidden" name="stock_change" value="-1">
+                                <button type="submit" name="update_stock" class="text-yellow-600 hover:text-yellow-900 transition" title="Deduct 1 Stock">
+                                    <i class="fas fa-minus-square text-lg"></i>
+                                </button>
+                            </form>
+                            <button type="button" class="text-red-600 hover:text-red-900 transition delete-product-btn" data-product-id="<?= htmlspecialchars($product['id']) ?>" data-bs-toggle="modal" data-bs-target="#deleteConfirmationModal" title="Remove Product">
+                                <i class="fas fa-trash text-lg"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <?php 
+                        endwhile; 
+                        $products_result->free();
+                    else:
+                    ?>
+                    <tr>
+                        <td colspan="7" class="px-3 py-4 text-center text-gray-500">No products found in this category.</td>
+                    </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <?php elseif ($current_view === 'users'): ?>
+        
+        <div class="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-primary-blue">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-medium text-gray-500">Total Registered Users</p>
+                        <p class="text-3xl font-bold text-gray-900 mt-1"><?= $total_users ?></p>
+                    </div>
+                    <i class="fas fa-users text-3xl text-primary-blue opacity-70"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-lg overflow-x-auto">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">
+                <i class="fas fa-user-circle mr-2 text-primary-blue"></i> Registered Users List
+            </h2>
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Registered On</th>
+                        <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <?php if (!empty($users_list)): ?>
+                        <?php foreach ($users_list as $user): ?>
+                        <tr class="hover:bg-gray-50 transition duration-150">
+                            <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900"><?= htmlspecialchars($user['id']) ?></td>
+                            <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold"><?= htmlspecialchars($user['name']) ?></td>
+                            <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($user['email']) ?></td>
+                            <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500"><?= date('Y-m-d H:i:s', strtotime($user['created_at'])) ?></td>
+                            <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-center">
+                                <button type="button" 
+                                        class="text-red-600 hover:text-red-900 transition remove-user-btn" 
+                                        data-user-id="<?= htmlspecialchars($user['id']) ?>" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#deleteUserConfirmationModal" 
+                                        title="Remove User">
+                                    <i class="fas fa-trash text-lg"></i> Remove
+                                </button>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="5" class="px-3 py-4 text-center text-gray-500">No users have registered yet.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+        
     </div>
-</div>
+
+    <div class="modal fade" id="editProductModal" tabindex="-1" aria-labelledby="editProductModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content rounded-xl shadow-2xl">
+          <div class="modal-header bg-primary-blue text-white rounded-t-xl border-b-0">
+            <h5 class="modal-title font-bold" id="editProductModalLabel"><i class="fas fa-edit mr-2"></i> Edit Product: <span id="edit_product_id_display"></span></h5>
+            <button type="button" class="btn-close text-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="view" value="products">
+            <div class="modal-body p-6">
+                <input type="hidden" name="product_id" id="edit_product_id">
+                <input type="hidden" name="current_image_path" id="edit_current_image_path">
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                    <div>
+                        <label for="edit_name" class="block text-sm font-medium text-gray-700">Name</label>
+                        <input type="text" name="edit_name" id="edit_name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    <div>
+                        <label for="edit_category_id" class="block text-sm font-medium text-gray-700">Category</label>
+                        <select name="edit_category_id" id="edit_category_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                            <option value="">Select Category</option>
+                            <?php 
+                            foreach ($categories_list as $name => $id): 
+                                if ($id > 0):
+                                    $is_parent = array_key_exists($name, $parent_categories);
+                            ?>
+                                <option 
+                                    value="<?= htmlspecialchars($id) ?>" 
+                                    <?= $is_parent ? 'disabled class="select-parent-option"' : 'class="font-semibold"' ?>
+                                >
+                                    <?= htmlspecialchars($name) ?> <?= $is_parent ? '(Parent)' : '' ?>
+                                </option>
+                                
+                                <?php 
+                                    if ($is_parent):
+                                        foreach ($parent_categories[$name] as $sub_name):
+                                            if (isset($categories_list[$sub_name])):
+                                ?>
+                                            <option 
+                                                value="<?= htmlspecialchars($categories_list[$sub_name]) ?>" 
+                                                style="padding-left: 20px;"
+                                                class="text-gray-700"
+                                            >
+                                                &nbsp;&nbsp;&nbsp;— <?= htmlspecialchars($sub_name) ?>
+                                            </option>
+                                <?php 
+                                        endif;
+                                    endforeach;
+                                endif;
+                            endif;
+                        endforeach; 
+                        ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="edit_price" class="block text-sm font-medium text-gray-700">Price ($)</label>
+                        <input type="number" step="0.01" name="edit_price" id="edit_price" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    <div>
+                        <label for="edit_stock_qty" class="block text-sm font-medium text-gray-700">Stock Qty</label>
+                        <input type="number" name="edit_stock_qty" id="edit_stock_qty" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="edit_image" class="block text-sm font-medium text-gray-700">New Image</label>
+                        <input type="file" name="edit_image" id="edit_image" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-200 file:text-gray-700 hover:file:bg-gray-300">
+                        <p class="text-xs text-gray-500 mt-1">Leave blank to keep current image.</p>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <label for="edit_details" class="block text-sm font-medium text-gray-700">Product Details</label>
+                    <textarea name="edit_details" id="edit_details" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-primary-blue focus:border-primary-blue" placeholder="Enter a detailed description of the product..."></textarea>
+                </div>
+
+            </div>
+            <div class="modal-footer justify-content-between p-4 bg-gray-50 rounded-b-xl border-t">
+              <button type="button" class="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-400 transition" data-bs-dismiss="modal">
+                  <i class="fas fa-times mr-2"></i> Cancel
+              </button>
+              <button type="submit" name="edit_product" class="px-4 py-2 bg-primary-blue text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition">
+                  <i class="fas fa-save mr-2"></i> Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="modal fade" id="deleteConfirmationModal" tabindex="-1" aria-labelledby="deleteConfirmationModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content rounded-xl shadow-2xl">
+          <div class="modal-header bg-red-500 text-white rounded-t-xl border-b-0">
+            <h5 class="modal-title font-bold" id="deleteConfirmationModalLabel"><i class="fas fa-exclamation-triangle mr-2"></i> PERMANENT PRODUCT REMOVAL</h5>
+            <button type="button" class="btn-close text-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-6">
+            <p class="text-gray-700">Are you absolutely sure you want to **PERMANENTLY** remove this product (ID: <span id="modal_product_id_display" class="font-extrabold text-red-600"></span>)?</p>
+          </div>
+          <div class="modal-footer justify-content-between p-4 bg-gray-50 rounded-b-xl border-t">
+            <button type="button" class="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-400 transition" data-bs-dismiss="modal">
+                <i class="fas fa-times mr-2"></i> Cancel
+            </button>
+            <form method="post" class="inline-block">
+                <input type="hidden" name="view" value="products">
+                <input type="hidden" name="product_id" id="modal_product_id" value="">
+                <button type="submit" name="remove_product" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition">
+                    <i class="fas fa-trash mr-2"></i> Yes, Remove Product
+                </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="deleteUserConfirmationModal" tabindex="-1" aria-labelledby="deleteUserConfirmationModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content rounded-xl shadow-2xl">
+          <div class="modal-header bg-red-500 text-white rounded-t-xl border-b-0">
+            <h5 class="modal-title font-bold" id="deleteUserConfirmationModalLabel"><i class="fas fa-exclamation-triangle mr-2"></i> PERMANENT USER REMOVAL</h5>
+            <button type="button" class="btn-close text-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-6">
+            <p class="text-gray-700">Are you absolutely sure you want to **PERMANENTLY** remove User ID: <span id="modal_user_id_display" class="font-extrabold text-red-600"></span>?</p>
+            <p class="mt-3 text-red-600 font-medium text-sm">This will delete the user's account permanently from the `users` table.</p>
+          </div>
+          <div class="modal-footer justify-content-between p-4 bg-gray-50 rounded-b-xl border-t">
+            <button type="button" class="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-400 transition" data-bs-dismiss="modal">
+                <i class="fas fa-times mr-2"></i> Cancel
+            </button>
+            <form method="post" class="inline-block">
+                <input type="hidden" name="view" value="users">
+                <input type="hidden" name="user_id" id="modal_user_id" value="">
+                <button type="submit" name="remove_user" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition">
+                    <i class="fas fa-trash mr-2"></i> Yes, Remove User
+                </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // Function to dynamically load and display the cart contents via AJAX
-        async function loadCartModalContent() {
-            const shoppingCartModal = document.getElementById('shoppingCartModal');
-            const modalBody = shoppingCartModal.querySelector('.modal-body');
-            const modalFooter = document.getElementById('cart-modal-footer');
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- Product Delete Modal Handlers ---
+            const deleteProductButtons = document.querySelectorAll('.delete-product-btn');
+            const modalProductIdField = document.getElementById('modal_product_id');
+            const modalProductIdDisplay = document.getElementById('modal_product_id_display');
 
-            // Set loading state
-            modalBody.innerHTML = '<div class="text-center p-5"><i class="fas fa-spinner fa-spin me-2"></i> Loading cart contents...</div>';
-            modalFooter.innerHTML = ''; 
-            document.getElementById('cart-item-count').textContent = '...';
-
-            try {
-                // Fetch the updated cart contents from the new dedicated endpoint
-                const response = await fetch('fetch_cart_modal.php'); 
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch cart data (Status: ${response.status})`);
-                }
-                const data = await response.json();
-                
-                // Update the DOM elements with fresh HTML
-                if (data.body_html) {
-                    modalBody.innerHTML = data.body_html;
-                }
-                if (data.footer_html) {
-                    modalFooter.innerHTML = data.footer_html;
-                }
-                document.getElementById('cart-item-count').textContent = data.cart_count;
-                
-                // Re-attach the AJAX listeners to the newly created "Remove" buttons
-                attachRemoveItemListeners();
-
-            } catch (error) {
-                console.error('Error loading cart modal:', error);
-                modalBody.innerHTML = '<div class="alert alert-danger text-center">Error loading cart. Please check console.</div>';
-                document.getElementById('cart-item-count').textContent = '0';
-            }
-        }
-        
-        // Function to attach listeners for the dynamically created "Remove" forms
-        function attachRemoveItemListeners() {
-            document.querySelectorAll('.remove-from-cart-form').forEach(form => {
-                form.addEventListener('submit', async function(e) {
-                    e.preventDefault(); // Stop the reload
-
-                    const formData = new FormData(this);
-                    const removeButton = this.querySelector('.btn-sm');
-                    const originalText = removeButton.innerHTML;
-                    
-                    removeButton.disabled = true;
-                    removeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-                    try {
-                        // Send data to the new remove handler file
-                        const response = await fetch('remove_from_cart.php', { 
-                            method: 'POST',
-                            body: formData
-                        });
-                        
-                        if (!response.ok) {
-                             throw new Error('Server removal failed');
-                        }
-                        const data = await response.json();
-                        
-                        if (data.success) {
-                            // After successful removal, reload the whole modal content
-                            await loadCartModalContent(); 
-                        } else {
-                            alert('Failed to remove item: ' + (data.error || 'Unknown error.'));
-                            removeButton.innerHTML = originalText;
-                            removeButton.disabled = false;
-                        }
-                    } catch (error) {
-                        console.error('AJAX Removal Error:', error);
-                        alert('An error occurred during cart removal. Check console.');
-                        removeButton.innerHTML = originalText;
-                        removeButton.disabled = false;
-                    }
-                });
-            });
-        }
-
-
-        document.addEventListener('DOMContentLoaded', function() {
-            
-            // ===============================================
-            // === 1. ADD TO CART AJAX FUNCTIONALITY (NO RELOAD) ===
-            // ===============================================
-            document.querySelectorAll('.add-to-cart-form').forEach(form => {
-                form.addEventListener('submit', async function(e) {
-                    e.preventDefault(); 
-                    
-                    const formData = new FormData(this);
-                    const submitButton = this.querySelector('.buy-btn');
-                    const originalText = submitButton.textContent;
-                    const originalBgColor = submitButton.style.backgroundColor;
-
-                    submitButton.disabled = true;
-                    submitButton.textContent = 'Adding...';
-
-                    try {
-                        const response = await fetch('add_to_cart.php', { // Path to the new handler file
-                            method: 'POST',
-                            body: formData
-                        });
-
-                        if (!response.ok) {
-                            throw new Error(`Server status: ${response.status}`);
-                        }
-                        const data = await response.json();
-
-                        if (data.success) {
-                            // 1. Update the Cart Count
-                            document.getElementById('cart-item-count').textContent = data.cart_count;
-                            
-                            // 2. Visual feedback
-                            submitButton.textContent = 'ADDED!';
-                            submitButton.style.backgroundColor = '#28a745'; 
-                            
-                            // 3. Reset button after a short delay
-                            setTimeout(() => {
-                                submitButton.textContent = originalText;
-                                submitButton.style.backgroundColor = originalBgColor || ''; 
-                                submitButton.disabled = false;
-                            }, 1000);
-                            
-                        } else {
-                            alert('Failed to add item: ' + (data.error || 'Unknown error.'));
-                            submitButton.textContent = originalText;
-                            submitButton.style.backgroundColor = originalBgColor || '';
-                            submitButton.disabled = false;
-                        }
-
-                    } catch (error) {
-                        console.error('AJAX Error:', error);
-                        alert('An error occurred during cart addition. Check console.');
-                        submitButton.textContent = originalText;
-                        submitButton.style.backgroundColor = originalBgColor || '';
-                        submitButton.disabled = false;
-                    }
+            deleteProductButtons.forEach(button => {
+                button.addEventListener('click', function () {
+                    const productId = this.getAttribute('data-product-id');
+                    modalProductIdField.value = productId;
+                    modalProductIdDisplay.textContent = productId; 
                 });
             });
 
+            // --- NEW: User Delete Modal Handlers ---
+            const removeUserButtons = document.querySelectorAll('.remove-user-btn');
+            const modalUserIdField = document.getElementById('modal_user_id');
+            const modalUserIdDisplay = document.getElementById('modal_user_id_display');
 
-            // ===============================================
-            // === 2. DYNAMICALLY LOAD CART MODAL CONTENT ===
-            // ===============================================
-            const shoppingCartModal = document.getElementById('shoppingCartModal');
+            removeUserButtons.forEach(button => {
+                button.addEventListener('click', function () {
+                    const userId = this.getAttribute('data-user-id');
+                    modalUserIdField.value = userId;
+                    modalUserIdDisplay.textContent = userId; 
+                });
+            });
             
-            if (shoppingCartModal) {
-                // Intercept the modal show event 
-                shoppingCartModal.addEventListener('show.bs.modal', function(event) {
-                    // Load the content every time the modal is opened
-                    loadCartModalContent(); 
-                });
-                
-                // Note: The listener for attaching remove item forms is inside loadCartModalContent
-            }
+            // --- Edit Product Modal Handlers ---
+            const editButtons = document.querySelectorAll('.edit-product-btn');
+            const editModalIdDisplay = document.getElementById('edit_product_id_display');
+            const editModalId = document.getElementById('edit_product_id');
+            const editModalName = document.getElementById('edit_name');
+            const editModalPrice = document.getElementById('edit_price');
+            const editModalStockQty = document.getElementById('edit_stock_qty');
+            const editModalCategory = document.getElementById('edit_category_id');
+            const editModalDetails = document.getElementById('edit_details');
+            const editModalImagePath = document.getElementById('edit_current_image_path');
 
-
-            // --- Other JS (Detail Modal, Contact Link) ---
-            const contactLink = document.getElementById('contact-link');
-            const contactSection = document.getElementById('contact-section');
-
-            if (contactLink && contactSection) {
-                contactLink.addEventListener('click', function(e) {
-                    e.preventDefault(); 
+            editButtons.forEach(button => {
+                button.addEventListener('click', function () {
+                    const productId = this.getAttribute('data-id');
+                    const productName = this.getAttribute('data-name');
+                    const productPrice = this.getAttribute('data-price');
+                    const productStockQty = this.getAttribute('data-stock-qty');
+                    const productCategoryId = this.getAttribute('data-category-id');
+                    const productDetails = this.getAttribute('data-details');
+                    const productImagePath = this.getAttribute('data-image-path');
                     
-                    contactSection.scrollIntoView({
-                        behavior: 'smooth'
-                    });
-                });
-            }
-
-            const detailModal = document.getElementById('productDetailModal');
-            if (detailModal) {
-                detailModal.addEventListener('show.bs.modal', event => {
-                    const button = event.relatedTarget;
+                    editModalIdDisplay.textContent = productId;
+                    editModalId.value = productId;
+                    editModalName.value = productName;
+                    editModalPrice.value = productPrice;
+                    editModalStockQty.value = productStockQty;
+                    editModalCategory.value = productCategoryId;
+                    editModalDetails.value = productDetails;
+                    editModalImagePath.value = productImagePath;
                     
-                    const productName = button.getAttribute('data-product-name');
-                    const productDetails = button.getAttribute('data-product-details');
-
-                    const modalTitle = detailModal.querySelector('#modal-product-name');
-                    const modalBodyDetails = detailModal.querySelector('#modal-product-details');
-
-                    modalTitle.textContent = productName;
-                    modalBodyDetails.textContent = productDetails;
+                    document.getElementById('edit_image').value = '';
                 });
-            }
+            });
         });
     </script>
-    </body>
+
+</body>
 </html>
 <?php 
 // Close the database connection at the end of the script
-if (isset($conn) && method_exists($conn, 'close')) {
-    @$conn->close(); 
+if (isset($stmt_products) && $stmt_products instanceof mysqli_stmt) {
+    @$stmt_products->close();
+}
+if (isset($conn)) {
+    @$conn->close();
 }
 ?>
